@@ -1,6 +1,6 @@
 # MINAR: Mechanistic Interpretability for Neural Algorithmic Reasoning
 
-This contains the code for the submission MINAR: Mechanistic Interpretability for Neural Algorithmic Reasoning to ICML 2026. The code was developed and tested using Python 3.12.3. The package requirements are listed in `environment.yml`.
+This contains the code for the submission MINAR: Mechanistic Interpretability for Neural Algorithmic Reasoning to NeurIPS 2026. The code was developed and tested using Python 3.12.3. The package requirements are listed in `environment.yml`.
 
 ## Instructions
 

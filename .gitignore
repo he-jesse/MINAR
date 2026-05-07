@@ -204,3 +204,5 @@ __marimo__/
 
 # Pytorch data, checkpoints, etc.
 *.pt
+
+.vscode/
