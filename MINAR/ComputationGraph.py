@@ -284,38 +284,80 @@ class Circuit(nx.DiGraph):
             If `False`, a copy of `G` will be made (default: `True`)
         use_abs (bool, optional): whether or not to take the absolute value of edge scores
             when selecting edges for the circuit (default: `True`)
+        include_all_outputs (bool, optional): whether or not to include all output nodes in the initial circuit. Only compatible with `"longest path"` algorithm (default: `True`)
+        circuit_algorithm (str, optional): which algorithm to use for circuit selection. Currently supported algorithms:
+            `"longest path"`: iteratively add longest paths through the highest-scoring edges (default)
+            `"greedy"`: iteratively add highest-scoring edges and their incident nodes without adding additional paths
     '''
     def __init__(self,
                  model: torch.nn.Module,
                  G: Optional[ComputationGraph]=None,
                  K: int=10,
+                 threshold: Optional[float]=None,
                  key: str='weight',
                  as_view:bool=True,
                  use_abs:bool=True,
-                 include_all_outputs:bool=True) -> None:
+                 include_all_outputs:bool=True,
+                 circuit_algorithm="greedy",
+                 prune=True) -> None:
 
         self.model = model
         self.model_state_dict = copy.deepcopy(model.state_dict())
         self.mask_handles = []
+        # Storage for saved circuit parameter masks and their values
+        self._circuit_param_masks = {}
+        self._circuit_param_values = {}
         if G is not None:
             self.G = G
         else:
             G = ComputationGraph(model)
 
-        assert nx.get_edge_attributes(G, key) is not None
-
-        self.layers = [[] for layer in G.layers]
-
-        circuit_edges = set()
+        assert nx.get_edge_attributes(self.G, key) is not None
         if use_abs:
-            sorted_edges = iter(sorted(nx.get_edge_attributes(G, key).items(), key=lambda item: abs(item[1]), reverse=True))
+            sorted_edges = iter(sorted(nx.get_edge_attributes(self.G, key).items(), key=lambda item: abs(item[1]), reverse=True))
         else:
-            sorted_edges = iter(sorted(nx.get_edge_attributes(G, key).items(), key=lambda item: item[1], reverse=True))
+            sorted_edges = iter(sorted(nx.get_edge_attributes(self.G, key).items(), key=lambda item: item[1], reverse=True))
+
+        self.layers = [[] for layer in self.G.layers]
+        if circuit_algorithm == "longest_path":
+            circuit_edges = self._build_circuit_longest(K, key, sorted_edges, include_all_outputs)
+        elif circuit_algorithm == "greedy":
+            circuit_edges = self._build_circuit_greedy(K, sorted_edges)
+        elif circuit_algorithm == "top_K":
+            circuit_edges = self._build_circuit_top_K(K, sorted_edges)
+        elif circuit_algorithm == "threshold":
+            circuit_edges = self._build_circuit_threshold(threshold, key, use_abs)
+        else:
+            raise NotImplementedError(f"Unknown circuit_algorithm: {circuit_algorithm}")
+        super().__init__(self.G.to_directed(as_view=as_view).edge_subgraph(circuit_edges))
+
+        # Prune isolated nodes until none remain
+        if prune:
+            isolated = self._find_isolated_nodes()
+            while isolated:
+                for isolated_node in isolated:
+                    layer = self.nodes[isolated_node]['layer']
+                    if isolated_node in self.layers[layer]:
+                        self.layers[layer].remove(isolated_node)
+                self.remove_nodes_from(isolated)
+                isolated = self._find_isolated_nodes()
+
+    def _build_circuit_longest(self, K: int, key: str, sorted_edges: iter, include_all_outputs: bool) -> None:
+        '''
+        Utility function to build circuit subgraph from computation graph.
+
+        Args:
+            K (int): number of edges to add after selecting initial paths
+            key (str): which score to use as weight during circuit selection
+            sorted_edges (iter): iterator over edges sorted by their scores
+            include_all_outputs (bool): whether to include all output nodes in the circuit
+        '''
+        circuit_edges = set()
         
         if include_all_outputs:
-            for output in G.layers[-1]:
+            for output in self.G.layers[-1]:
                 self.layers[-1].append(output)
-                path = longest_path(G, G.layers[0], [output], top_sort=G.layers, key = key)
+                path = longest_path(self.G, self.G.layers[0], [output], top_sort=self.G.layers, key = key)
                 for j in range(1, len(path)):
                     circuit_edges.add((path[j-1], path[j]))
                     if path[j-1] not in self.layers[j-1]:
@@ -325,17 +367,101 @@ class Circuit(nx.DiGraph):
         while k < K:
             edge_to_add, _ = next(sorted_edges)
             if edge_to_add not in circuit_edges:
-                pre_path = longest_path(G, G.layers[0], [edge_to_add[0]], top_sort=G.layers, key=key)
-                post_path = longest_path(G, [edge_to_add[1]], G.layers[-1], top_sort=G.layers, key=key)
+                pre_path = longest_path(self.G, self.G.layers[0], [edge_to_add[0]], top_sort=self.G.layers, key=key)
+                post_path = longest_path(self.G, [edge_to_add[1]], self.G.layers[-1], top_sort=self.G.layers, key=key)
                 path = pre_path + post_path
                 for j in range(1, len(path)):
                     circuit_edges.add((path[j-1], path[j]))
-                    l = G.nodes[path[j-1]]['layer']
+                    l = self.G.nodes[path[j-1]]['layer']
                     if path[j-1] not in self.layers[l]:
                         self.layers[l].append(path[j-1])
                 k += 1
-        
-        super().__init__(G.to_directed(as_view=as_view).edge_subgraph(circuit_edges))
+        return circuit_edges
+
+    def _build_circuit_greedy(self, K: int, sorted_edges: iter) -> None:
+        '''
+        Utility function to build circuit subgraph from computation graph using a greedy algorithm
+        that starts from the logits and adds the highest-scoring edges on the frontier.
+
+        Args:
+            K (int): number of edges to add
+            sorted_edges (iter): iterator over edges sorted by their scores
+        '''
+        sorted_edges = list(sorted_edges)
+        circuit_nodes = set(self.G.layers[-1])
+        self.layers[-1] = list(circuit_nodes)
+        circuit_edges = set()
+        k = 0
+        while k < K:
+            frontier_edges = [edge for edge, score in sorted_edges if (edge[1] in circuit_nodes) and edge not in circuit_edges]
+            if not frontier_edges:
+                break
+            edge_to_add = frontier_edges[0]
+            circuit_edges.add(edge_to_add)
+            circuit_nodes.add(edge_to_add[0])
+            k += 1
+            l = self.G.nodes[edge_to_add[0]]['layer']
+            if edge_to_add[0] not in self.layers[l]:
+                self.layers[l].append(edge_to_add[0])
+        return circuit_edges
+
+    def _build_circuit_top_K(self, K: int, sorted_edges: iter) -> None:
+        '''
+        Alternative utility function to build circuit subgraph from computation graph using the top K edges.
+
+        Args:
+            K (int): number of edges to add
+            sorted_edges (iter): iterator over edges sorted by their scores
+            include_all_outputs (bool): whether to include all output nodes in the circuit
+        '''
+        circuit_edges = set()
+        k = 0
+        while k < K:
+            edge_to_add, _ = next(sorted_edges)
+            if edge_to_add not in circuit_edges:
+                circuit_edges.add(edge_to_add)
+                for v in edge_to_add:
+                    l = self.G.nodes[v]['layer']
+                    if v not in self.layers[l]:
+                        self.layers[l].append(v)
+                k += 1
+        return circuit_edges
+    
+    def _build_circuit_threshold(self, threshold: float, key: str, use_abs: bool) -> None:
+        '''
+        Alternative utility function to build circuit subgraph from computation graph using a thresholding algorithm.
+
+        Args:
+            threshold (float): score threshold for including edges in the circuit
+            key (str): which score to use as weight during circuit selection
+            use_abs (bool): whether to use absolute value of scores when applying threshold
+        '''
+        circuit_edges = set()
+        for edge, score in nx.get_edge_attributes(self.G, key).items():
+            val = abs(score) if use_abs else score
+            if val >= threshold:
+                circuit_edges.add(edge)
+                for v in edge:
+                    l = self.G.nodes[v]['layer']
+                    if v not in self.layers[l]:
+                        self.layers[l].append(v)
+        return circuit_edges
+
+    def _find_isolated_nodes(self) -> list:
+        '''
+        Utility function to find isolated nodes in the circuit subgraph (i.e. parentless nodes that are not inputs or
+        childless nodes that are not outputs).
+
+        Returns:
+            List of isolated nodes in the circuit subgraph.
+        '''
+        isolated_nodes = []
+        for v in self.nodes:
+            if self.in_degree(v) == 0 and (v not in self.G.layers[0] and 'input' not in v):
+                isolated_nodes.append(v)
+            elif self.out_degree(v) == 0 and v not in self.G.layers[-1]:
+                isolated_nodes.append(v)
+        return isolated_nodes
 
     def _apply_masks(self, default_one: bool, invert: bool) -> None:
         '''
@@ -417,3 +543,82 @@ class Circuit(nx.DiGraph):
         out = _apply_model(self.model, data, **kwargs)
         self._clear_masks()
         return out
+    
+    def save_circuit_parameter_mask(self, invert=False) -> None:
+        '''
+        Save masks indicating which parameter entries belong to the circuit along
+        with snapshots of the current parameter values. Call this before training
+        steps so the saved values can be restored later.
+        '''
+        self._circuit_param_masks = {}
+        self._circuit_param_values = {}
+        for name, module in self.G.modules.items():
+            # Find nodes in the full computation graph that belong to this module
+            module_nodes = []
+            prefix = f'{name}.'
+            for v in self.G.nodes():
+                if v.startswith(prefix):
+                    module_nodes.append(v)
+
+            # Build input list (predecessors)
+            inputs = OrderedDict()
+            for v in module_nodes:
+                for u in self.G.predecessors(v):
+                    if not self.G[u][v].get('addition', False):
+                        inputs[u] = None
+            input_list = list(inputs.keys())
+
+            if hasattr(module, 'weight'):
+                module_nodes.sort(key=lambda x: int(x.split('.')[-1]))
+
+                # Build boolean masks for weight and bias entries that are part of
+                # the circuit (i.e. edges present in this Circuit subgraph).
+                weight_mask = torch.zeros_like(module.weight, dtype=torch.bool)
+                for (j, u), (i, v) in itertools.product(enumerate(input_list), enumerate(module_nodes)):
+                    if self.has_edge(u, v):
+                        weight_mask[i, j] = True
+
+                bias_mask = None
+                if hasattr(module, 'bias') and module.bias is not None:
+                    bias_mask = torch.zeros_like(module.bias, dtype=torch.bool)
+                    for i, v in enumerate(module_nodes):
+                        connected = False
+                        for u in input_list:
+                            if self.has_edge(u, v):
+                                connected = True
+                                break
+                        bias_mask[i] = connected
+
+                # If requested, invert masks to mark non-circuit entries instead
+                if invert:
+                    weight_mask = ~weight_mask
+                    if bias_mask is not None:
+                        bias_mask = ~bias_mask
+
+                # Snapshot current parameter values
+                self._circuit_param_masks[name] = {'weight_mask': weight_mask, 'bias_mask': bias_mask}
+                self._circuit_param_values[name] = {'weight': module.weight.data.clone(),
+                                                   'bias': module.bias.data.clone() if hasattr(module, 'bias') and module.bias is not None else None}
+
+    def restore_circuit_parameters(self, model) -> None:
+        '''
+        Set model parameter entries to their saved circuit values. Intended to be
+        called after an optimizer step to ensure circuit parameters remain fixed
+        to the saved snapshot.
+        '''
+        with torch.no_grad():
+            for name, module in model.named_modules():
+                if hasattr(module, 'weight'):
+                    masks = self._circuit_param_masks.get(name, None)
+                    vals = self._circuit_param_values.get(name, None)
+                    if masks is None or vals is None:
+                        print(f"Warning: No saved mask or parameter values found for module {name}. Skipping restoration for this module.")
+                        continue
+
+                    weight_mask = masks.get('weight_mask', None)
+                    if weight_mask is not None:
+                        module.weight[weight_mask] = vals['weight'][weight_mask]
+
+                    bias_mask = masks.get('bias_mask', None)
+                    if bias_mask is not None and vals.get('bias', None) is not None:
+                        module.bias[bias_mask] = vals['bias'][bias_mask]

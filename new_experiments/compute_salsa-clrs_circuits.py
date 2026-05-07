@@ -6,7 +6,6 @@ import os
 import argparse
 
 import torch
-from model.MinAggGNN import MinAggGNN
 from model.GINE import GINE
 from model.RecGINE import RecGINE
 
@@ -23,22 +22,21 @@ from salsaclrs import specs
 from baselines.core.metrics import calc_metrics
 from salsaclrs.data import SALSACLRSDataLoader
 from torch_geometric.loader import DataLoader
+from EncodeProcessDecode import EncodeProcessDecode
 
 args = argparse.ArgumentParser()
-args.add_argument('--lr', type=float, default=0.001, help='Learning rate')
-args.add_argument('--eta', type=float, default=0.001, help='L1 regularization coefficient')
-args.add_argument('--weight_decay', type=float, default=0.1, help='Weight decay')
-args.add_argument('--device', type=str, default='cuda', help='Device to use (cuda or cpu)')
-args.add_argument('--K', type=int, default=100, help='Number of paths to add the circuit')
+args.add_argument('--checkpoint_name', type=str, help='Name of the checkpoint (without .pt extension) to use for naming the circuit file')
+args.add_argument('--model_checkpoint', type=str, help='Path to the model checkpoint to use for circuit construction')
+args.add_argument('--computation_graph', type=str, help='Path to the scored computation graph to use for circuit construction')
+args.add_argument('--circuit_algorithm', type=str, default='longest_path', help='Algorithm to use for circuit construction')
+args.add_argument('--prune', type=bool, default=True, help='Whether to prune the circuit after construction')
+args.add_argument('--K', type=int, default=100, help='Number of edges to add the circuit')
 args.add_argument('--score', type=str, default='weight', help='Scoring method to use')
 args = args.parse_args()
 
-device = torch.device(args.device) if torch.cuda.is_available() else torch.device('cpu')
-lr = args.lr
-eta = args.eta
-weight_decay = args.weight_decay
+print(f'Using {args.circuit_algorithm} to construct {args.score} circuit with {args.K} edges from model checkpoint: {args.checkpoint_name}')
 
-from EncodeProcessDecode import EncodeProcessDecode
+device = 'cpu'
 algorithms = ['bfs', 'dfs', 'dijkstra', 'mst_prim', 'bellman_ford', 'articulation_points', 'bridges']
 output_types = {
     'bfs' : 'pointer',
@@ -71,8 +69,8 @@ processor = GINE(3*128, 128, 2, 128, edge_dim=1, aggr='max')
 processor.to(device)
 model = EncodeProcessDecode(encoders, decoders, processor, device=device)
 
-model_checkpoint = f'distributed_GINE_l1_schedule_lr={lr}_eta={eta}_weight_decay={weight_decay}_batch_size=32_seed=0/model_best.pt'
-model_state = torch.load(f'checkpoints/{model_checkpoint}', map_location=device)
+args.model_checkpoint
+model_state = torch.load(args.model_checkpoint, map_location=device)
 model.load_state_dict(model_state)
 model.eval()
 model.to(device)
@@ -88,31 +86,27 @@ G.add_module('convs.1.lin', processor.convs[1].lin,
             layer=0)
 G.correct_layers()
 
-G_save_string = f'G_scores_lr={lr}_eta={eta}_weight_decay={weight_decay}.pt'
-G_scores = torch.load(f'scored_computation_graphs/{G_save_string}', weights_only=False, map_location=device)
+G_scores = torch.load(args.computation_graph, weights_only=False, map_location=device)
 for edge, data in G_scores.items():
     G.add_edge(*edge, **data)
 
-circuit_path = f'salsa_clrs_circuits_lr={lr}_eta={eta}_weight_decay={weight_decay}_K={args.K}_score={args.score}.pt'
+circuit_path = f'salsa_clrs_circuits_{args.circuit_algorithm}_new_prune={args.prune}_{args.checkpoint_name}_{args.score}_{args.K}.pt'
 circuits = {}
 if os.path.exists(f'circuits/{circuit_path}'):
     circuits = torch.load(f'circuits/{circuit_path}', weights_only=False, map_location=device)
 
-K = args.K
-score_method = args.score
-
-if score_method == 'weight':
-    weight_circuit = SALSACLRSCircuit(model, G, K, key='weight')
+if args.score == 'weight':
+    weight_circuit = SALSACLRSCircuit(model, G, args.K, key='weight', circuit_algorithm=args.circuit_algorithm, prune=args.prune)
 
 for algorithm in algorithms:
-    if (algorithm, K, score_method) in circuits:
-        print(f'Circuit for {algorithm} with K={K} and score method {score_method} already exists. Skipping...')
-    elif score_method == 'weight':
-        circuits[(algorithm, K, score_method)] = weight_circuit
-        print(f'{algorithm} circuit with K={K} and score method {score_method}: {circuits[(algorithm, K, score_method)].number_of_edges()} edges')
+    if (algorithm, args.K, args.score) in circuits:
+        print(f'Circuit for {algorithm} with K={args.K} and score method {args.score} already exists. Skipping...')
+    elif args.score == 'weight':
+        circuits[(algorithm, args.K, args.score)] = weight_circuit
+        print(f'{algorithm} circuit with K={args.K} and score method {args.score}: {circuits[(algorithm, args.K, args.score)].number_of_edges()} edges')
     else:
-        circuits[(algorithm, K, score_method)] = SALSACLRSCircuit(model, G, K, key=f'{score_method}_{algorithm}')
-        print(f'{algorithm} circuit with K={K} and score method {score_method}: {circuits[(algorithm, K, score_method)].number_of_edges()} edges')
+        circuits[(algorithm, args.K, args.score)] = SALSACLRSCircuit(model, G, args.K, key=f'{args.score}_{algorithm}', circuit_algorithm=args.circuit_algorithm, prune=args.prune)
+        print(f'{algorithm} circuit with K={args.K} and score method {args.score}: {circuits[(algorithm, args.K, args.score)].number_of_edges()} edges')
 
 # Remove model and G references to avoid pickling the model
 for circuit in circuits.values():

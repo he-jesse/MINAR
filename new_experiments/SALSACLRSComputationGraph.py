@@ -373,13 +373,16 @@ class SALSACLRSCircuit(Circuit):
                  model: torch.nn.Module,
                  G: Optional[ComputationGraph]=None,
                  K: int=10,
+                 threshold: Optional[float]=None,
                  key: str='EAP',
                  as_view:bool=True,
                  use_abs:bool=True,
-                 include_all_outputs:bool=False) -> None:
+                 include_all_outputs:bool=False,
+                 circuit_algorithm:str='greedy',
+                 prune: Optional[bool]=True) -> None:
         
         self.EncodeProcessDecode = model
-        super().__init__(model.processor, G, K, key, as_view, use_abs, include_all_outputs)
+        super().__init__(model.processor, G, K, threshold, key, as_view, use_abs, include_all_outputs, circuit_algorithm, prune)
     
     @override
     def forward(self, data, **kwargs):

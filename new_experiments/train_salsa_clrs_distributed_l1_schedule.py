@@ -22,7 +22,7 @@ from baselines.core.loss import CLRSLoss
 from baselines.core.metrics import calc_metrics
 
 from salsaclrs import specs, load_dataset
-from salsaclrs.data import SALSACLRSDataLoader
+from salsaclrs.data import SALSACLRSDataLoader, SALSACLRSDataset, er_probabilities
 
 # Tasks and outputs (constants can remain at module level)
 algorithms = ['bfs', 'dfs', 'dijkstra', 'mst_prim', 'bellman_ford', 'articulation_points', 'bridges']
@@ -33,7 +33,25 @@ output_types = {
     'mst_prim' : 'pointer',
     'bellman_ford' : 'pointer',
     'articulation_points' : 'mask',
-    'bridges' : 'pointer',
+    'bridges' : 'edge_mask',
+}
+train_generators = {
+    "er" : {'p_range': er_probabilities(16), 'n' : [4, 7, 11, 13, 16]},
+    "ba" : {'n' : [4, 7, 11, 13, 16], 'm' : [1, 2, 3]},
+    # "sbm" : {'n' : [4, 7, 11, 13, 16], 'k' : [2, 3, 4], 'p_in' : [0.5, 0.7], 'p_out' : [0.01, 0.1], 'low' : 1, 'high' : 5},
+    # "complete" : {'n' : [4, 7, 11, 13, 16], 'low' : 1, 'high' : 5},
+    # "path" : {'n' : [4, 7, 11, 13, 16], 'low' : 1, 'high' : 5},
+    "tree" : {'n' : [4, 7, 11, 13, 16], 'r' : [2, 3, 4]},
+    "barbell" : {'n' : [7, 11, 13, 16], 'm' : [1, 2, 3], 'low' : 1, 'high' : 5},
+}
+val_generators = {
+    "er" : {'p_range': er_probabilities(16), 'n' : 16},
+    "ba" : {'n' : 16, 'm' : [1,2,3]},
+    # "sbm" : {'n' : 16, 'k' : 4, 'p_in' : 0.7, 'p_out' : 0.01, 'low' : 1, 'high' : 5},
+    # "complete" : {'n' : 16, 'low' : 1, 'high' : 5},
+    # "path" : {'n' : 16, 'low' : 1, 'high' : 5},
+    "tree" : {'n' : 16, 'r' : [2,3,4]},
+    "barbell" : {'n' : 16, 'm' : [1,2,3]},
 }
 
 def _to_pylist(x):
@@ -60,15 +78,38 @@ def cleanup():
     except Exception:
         pass
 
+def load_train_data(root, algorithm):
+    datasets = []
+    for generator, graph_kwargs in train_generators.items():
+        datasets.append(SALSACLRSDataset(ignore_all_hints=False, root=root,
+                                         split="train", algorithm=algorithm,
+                                         num_samples=250, graph_generator=generator,
+                                         graph_generator_kwargs=graph_kwargs,
+                                         max_cores=-1, seed=42)
+                                         )
+    return torch.utils.data.ConcatDataset(datasets)
+
+def load_val_data(root, algorithm):
+    datasets = []
+    for generator, graph_kwargs in val_generators.items():
+        datasets.append(SALSACLRSDataset(ignore_all_hints=True, root=root,
+                                         split="val", algorithm=algorithm,
+                                         num_samples=250, graph_generator=generator,
+                                         graph_generator_kwargs=graph_kwargs,
+                                         max_cores=-1, seed=42)
+                                         )
+    return torch.utils.data.ConcatDataset(datasets)
+
 def resume_training(checkpoint_path, local_device, model, optimizer, scheduler,
-                    algorithms, logger, current_task_losses, current_val_accs, current_test_accs,
+                    algorithms, logger, current_task_losses, current_train_accs, current_val_accs, current_test_accs,
                     current_best_avg_val, current_best_epoch):
     """
     Attempt to resume training from checkpoint files in checkpoint_path.
-    Returns: start_epoch, task_losses, val_accs, test_accs, best_avg_val, best_epoch
+    Returns: start_epoch, task_losses, train_accs, val_accs, test_accs, best_avg_val, best_epoch
     """
     start_epoch = 0
     task_losses = current_task_losses
+    train_accs = current_train_accs
     val_accs = current_val_accs
     test_accs = current_test_accs
     best_avg_val = current_best_avg_val
@@ -126,29 +167,37 @@ def resume_training(checkpoint_path, local_device, model, optimizer, scheduler,
             except Exception as e:
                 logger.warning(f'Failed to restore optimizer/scheduler from training state: {e}')
 
-            # attempt to also restore training progress (task_losses, val_accs, test_accs)
+            # attempt to also restore training progress (task_losses, train_accs, val_accs, test_accs)
             tl_path = os.path.join(checkpoint_path, 'task_losses.pt')
+            tr_path = os.path.join(checkpoint_path, 'train_accs.pt')
             va_path = os.path.join(checkpoint_path, 'val_accs.pt')
             ta_path = os.path.join(checkpoint_path, 'test_accs.pt')
             loaded_task_losses = {}
+            loaded_train_accs = {}
             loaded_val_accs = {}
             loaded_test_accs = {}
-            if os.path.exists(tl_path) and os.path.exists(va_path) and os.path.exists(ta_path):
+            if os.path.exists(tl_path) and os.path.exists(tr_path) and os.path.exists(va_path) and os.path.exists(ta_path):
                 try:
                     loaded_task_losses = torch.load(tl_path)
                     print(f'Loaded task_losses from {tl_path} with keys: {list(loaded_task_losses.keys())}')
+                    loaded_train_accs = torch.load(tr_path)
+                    print(f'Loaded train_accs from {tr_path} with keys: {list(loaded_train_accs.keys())}')
                     loaded_val_accs = torch.load(va_path)
                     print(f'Loaded val_accs from {va_path} with keys: {list(loaded_val_accs.keys())}')
                     loaded_test_accs = torch.load(ta_path)
                     print(f'Loaded test_accs from {ta_path} with keys: {list(loaded_test_accs.keys())}')
                 except Exception as e:
-                    logger.warning(f'Could not load task_losses/val_accs/test_accs: {e}')
+                    logger.warning(f'Could not load task_losses/train_accs/val_accs/test_accs: {e}')
 
             # normalize into dicts of python lists (one list per task)
             if loaded_task_losses:
                 task_losses = {task: _to_pylist(loaded_task_losses.get(task, [])) for task in algorithms}
             else:
                 task_losses = {task: _to_pylist(current_task_losses.get(task, [])) for task in algorithms}
+            if loaded_train_accs:
+                train_accs = {task: _to_pylist(loaded_train_accs.get(task, [])) for task in algorithms}
+            else:
+                train_accs = {task: _to_pylist(current_train_accs.get(task, [])) for task in algorithms}
             if loaded_val_accs:
                 val_accs = {task: _to_pylist(loaded_val_accs.get(task, [])) for task in algorithms}
             else:
@@ -164,6 +213,10 @@ def resume_training(checkpoint_path, local_device, model, optimizer, scheduler,
                 if len(task_losses.get(task, [])) < desired_len_tl:
                     task_losses[task].extend([0.0] * (desired_len_tl - len(task_losses[task])))
 
+                desired_len_tr = len(current_train_accs.get(task, []))
+                if len(train_accs.get(task, [])) < desired_len_tr:
+                    train_accs[task].extend([0.0] * (desired_len_tr - len(train_accs[task])))
+
                 desired_len_va = len(current_val_accs.get(task, []))
                 if len(val_accs.get(task, [])) < desired_len_va:
                     val_accs[task].extend([0.0] * (desired_len_va - len(val_accs[task])))
@@ -173,17 +226,18 @@ def resume_training(checkpoint_path, local_device, model, optimizer, scheduler,
                     test_accs[task].extend([0.0] * (desired_len_ta - len(test_accs[task])))
 
             # compute minimum available length across all tasks/records
-            lengths = [len(v) for v in list(task_losses.values()) + list(val_accs.values()) + list(test_accs.values())]
+            lengths = [len(v) for v in list(task_losses.values()) + list(train_accs.values()) + list(val_accs.values()) + list(test_accs.values())]
             min_len = min(lengths) if lengths else 0
             print(f'Checkpoint loaded with progress for {min_len} epochs. Checking for all-zero columns to determine resume point...')
 
-            # find first index where task_losses[:,idx] or val_accs[:,idx] or test_accs[:,idx] are all zeros
+            # find first index where task_losses[:,idx] or train_accs[:,idx] or val_accs[:,idx] or test_accs[:,idx] are all zeros
             start_epoch = 0
             for i in range(min_len):
                 all_task_zero = any(float(task_losses[t][i]) == 0.0 for t in algorithms)
+                all_train_zero = any(float(train_accs[t][i]) == 0.0 for t in algorithms)
                 all_val_zero = any(float(val_accs[t][i]) == 0.0 for t in algorithms)
                 all_test_zero = any(float(test_accs[t][i]) == 0.0 for t in algorithms)
-                if all_task_zero or all_val_zero or all_test_zero:
+                if all_task_zero or all_train_zero or all_val_zero or all_test_zero:
                     start_epoch = i
                     break
             else:
@@ -216,20 +270,23 @@ def resume_training(checkpoint_path, local_device, model, optimizer, scheduler,
         logger.warning('No in-progress checkpoint found (or model_final exists). Starting from epoch 0.')
         start_epoch = 0
 
-    return start_epoch, task_losses, val_accs, test_accs, best_avg_val, best_epoch
+    return start_epoch, task_losses, train_accs, val_accs, test_accs, best_avg_val, best_epoch
 
 def checkpoint_and_test(epoch, avg_val_scalar, checkpoint_path, model_ddp, optimizer, scheduler,
-                                local_device, task_losses, val_accs, test_accs,
+                                local_device, task_losses, train_accs, val_accs, test_accs,
                                 algorithms, logger, best_avg_val, best_epoch, total_losses):
     """
     Save checkpoints, update best model, and run per-epoch test (intended to be called only on rank 0).
-    Returns updated (best_avg_val, best_epoch). Mutates task_losses/val_accs/test_accs in-place.
+    Returns updated (best_avg_val, best_epoch). Mutates task_losses/train_accs/val_accs/test_accs in-place.
     """
     try:
-        print(f'Epoch {epoch+1}/{len(total_losses)} - Train Loss: {total_losses[epoch]:.4f} - Val Accs: ' +
-                ', '.join(f'{task}: {val_accs[task][epoch]:.4f}' for task in algorithms))
+        print(f'Epoch {epoch+1}/{len(total_losses)} - Train Loss: {total_losses[epoch]:.4f} - Train Accs: ' +
+                ', '.join(f'{task}: {train_accs[task][epoch]:.4f}' for task in algorithms))
+        print('Val Accs: ' + ', '.join(f'{task}: {val_accs[task][epoch]:.4f}' for task in algorithms))
+        print('Test Accs: ' + ', '.join(f'{task}: {test_accs[task][epoch]:.4f}' for task in algorithms))
         os.makedirs(checkpoint_path, exist_ok=True)
         torch.save(task_losses, os.path.join(checkpoint_path, 'task_losses.pt'))
+        torch.save(train_accs, os.path.join(checkpoint_path, 'train_accs.pt'))
         torch.save(val_accs, os.path.join(checkpoint_path, 'val_accs.pt'))
         torch.save(test_accs, os.path.join(checkpoint_path, 'test_accs.pt'))
         # always save in-progress model
@@ -304,12 +361,13 @@ def main(rank, world_size, args, checkpoint_path):
 
         # train/val/test loaders for the local task
         print(f'Rank {rank} loading train data for task {local_task}...')
-        train_data = load_dataset(local_task, 'train', local_dir)
+        # train_data = load_dataset(local_task, 'train', local_dir)
+        train_data = load_train_data(local_dir, local_task)
         local_train_loader = SALSACLRSDataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=1)
 
         print(f'Rank {rank} loading val data for task {local_task}...')
-        val_data = load_dataset(local_task, 'val', local_dir)
-        local_val_loader = SALSACLRSDataLoader(val_data, batch_size=N_each, num_workers=1)
+        val_data = load_val_data(local_dir, local_task)
+        local_val_loader = SALSACLRSDataLoader(val_data, batch_size=len(val_data), num_workers=1)
 
         print(f'Rank {rank} loading test data for task {local_task}...')
         test_data = load_dataset(local_task, 'test', local_dir)
@@ -359,33 +417,45 @@ def main(rank, world_size, args, checkpoint_path):
         optimizer = torch.optim.AdamW(model_ddp.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.2, patience=5)
         # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.2)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=args.lr / 100)
+        if args.schedule:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=args.lr / 100)
+        else:
+            scheduler = torch.optim.lr_scheduler.ConstantLR(optimizer, factor=1.0, total_iters=0)
 
         # Storage for aggregated results (shared via all_gather)
         total_losses = [0 for _ in range(epochs)]
         task_losses = {task : [0 for _ in range(epochs)] for task in algorithms}
+        train_accs = {task : [0 for _ in range(epochs)] for task in algorithms}
         val_accs = {task : [0 for _ in range(epochs)] for task in algorithms}
         test_accs = {task : [0 for _ in range(epochs)] for task in algorithms}
         best_avg_val = float('-inf')
         best_epoch = -1
 
         # Call resume helper to possibly restore model/optimizer/scheduler and progress
-        start_epoch, task_losses, val_accs, test_accs, best_avg_val, best_epoch = resume_training(
+        start_epoch, task_losses, train_accs, val_accs, test_accs, best_avg_val, best_epoch = resume_training(
             checkpoint_path, local_device, model, optimizer, scheduler,
-            algorithms, logger, task_losses, val_accs, test_accs, best_avg_val, best_epoch
+            algorithms, logger, task_losses, train_accs, val_accs, test_accs, best_avg_val, best_epoch
         )
 
         def train_one_epoch(loader):
             # with torch.autograd.detect_anomaly():
                 model_ddp.train()
                 running_out_sum = torch.tensor(0., device=local_device)
+                running_hint_sum = torch.tensor(0., device=local_device)
+                running_hidden_sum = torch.tensor(0., device=local_device)
+                running_accuracy = torch.tensor(0., device=local_device)
                 num_batches = 0
+                total_nodes = 0
                 last_task_batch_loss = 0.0
+
                 with torch.no_grad():
-                    cos_schedule = torch.cos(torch.tensor(epoch / epochs * torch.pi))
-                    l1_scaler = eta * (1 - cos_schedule)
-                    for param_group in optimizer.param_groups:
-                        param_group['weight_decay'] = weight_decay * cos_schedule
+                    if args.schedule:
+                        cos_schedule = (1 + torch.cos(torch.tensor(epoch / epochs * torch.pi))) / 2
+                        l1_scaler = eta * (1 - cos_schedule)
+                        for param_group in optimizer.param_groups:
+                            param_group['weight_decay'] = weight_decay * cos_schedule
+                    else:
+                        l1_scaler = eta
                 for batch in loader:
                     num_batches += 1
                     batch.to(local_device)
@@ -402,22 +472,35 @@ def main(rank, world_size, args, checkpoint_path):
                     total_batch_loss = out_loss.sum() + lambda_hint * hint_loss.sum() + lambda_hidden * hidden_loss.sum()
                     l1_norm = sum(torch.abs(p).sum() for p in model_ddp.module.processor.parameters())
                     total_batch_loss = total_batch_loss + l1_scaler * l1_norm
-
                     total_batch_loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model_ddp.parameters(), max_norm=10.0)
+
+                    total_grad = torch.nn.utils.clip_grad_norm_(model_ddp.parameters(), max_norm=10.0)
+                    # print(f'{local_task} total_grad: {total_grad}')
                     optimizer.step()
 
                     running_out_sum += out_loss.sum().detach()
+                    running_hint_sum += hint_loss.sum().detach()
+                    running_hidden_sum += hidden_loss.sum().detach()
                     try:
                         last_task_batch_loss = out_loss.item()
                     except:
                         last_task_batch_loss = out_loss.sum().item()
 
+                    metrics = calc_metrics(batch.outputs[0], out, batch, output_types[local_task])
+                    if local_task == 'articulation_points':
+                        running_accuracy += metrics['node_f1'].mean().to(local_device) * batch.num_nodes
+                    elif local_task == 'bridges':
+                        running_accuracy += metrics['edge_f1'].mean().to(local_device) * batch.num_edges
+                    else:
+                        running_accuracy += metrics['node_accuracy'].mean().to(local_device) * batch.num_nodes
+                    total_nodes += batch.num_nodes if local_task != 'bridges' else batch.num_edges
+
                 if num_batches == 0:
                     avg_out = torch.tensor(0., device=local_device)
                 else:
                     avg_out = running_out_sum / float(num_batches)
-                return avg_out, last_task_batch_loss
+                # print(local_task, f"Out Loss: {avg_out.item():.4f}", f"Hint Loss: {running_hint_sum.item() / num_batches:.4f}", f"Hidden Loss: {running_hidden_sum.item() / num_batches:.4f}")
+                return avg_out, last_task_batch_loss, running_accuracy / float(total_nodes)
 
         def evaluate(loader):
             model_ddp.eval()
@@ -432,24 +515,35 @@ def main(rank, world_size, args, checkpoint_path):
                         batch.edge_attr = torch.zeros((batch.num_edges, 1), device=local_device)
                     out, hints, hidden = model_ddp(batch)
                     metrics = calc_metrics(batch.outputs[0], out, batch, output_types[local_task])
-                    accuracies.append(metrics['node_accuracy'].to(local_device))
+                    if local_task == 'articulation_points':
+                        accuracies.append(metrics['node_f1'].to(local_device))
+                    elif local_task == 'bridges':
+                        accuracies.append(metrics['edge_f1'].to(local_device))
+                    else:
+                        accuracies.append(metrics['node_accuracy'].to(local_device))
                 if len(accuracies) == 0:
                     return torch.tensor(0., device=local_device)
                 return torch.stack(accuracies).mean()
 
         # Training loop
         for epoch in range(start_epoch, epochs):
-            local_avg_out, local_task_last = train_one_epoch(local_train_loader)
+            # print(f'Rank {rank} starting epoch {epoch+1}/{epochs} for task {local_task}...')
+            local_avg_out, local_task_last, local_accuracy = train_one_epoch(local_train_loader)
 
             # gather training losses from all ranks
             gather_list = [torch.zeros_like(local_avg_out) for _ in range(world_size)]
             dist.all_gather(gather_list, local_avg_out)
             gathered_train = torch.stack(gather_list)
             total_losses[epoch] = gathered_train.sum().item()
+            gather_acc = [torch.zeros_like(local_accuracy) for _ in range(world_size)]
+            dist.all_gather(gather_acc, local_accuracy)
+
             for i, t in enumerate(algorithms):
                 task_losses[t][epoch] = gathered_train[i].item()
+                train_accs[t][epoch] = gather_acc[i].item()
 
             # validation
+            # print(f'Rank {rank} evaluating on validation set for task {local_task}...')
             local_val = evaluate(local_val_loader)
             gather_val = [torch.zeros_like(local_val) for _ in range(world_size)]
             dist.all_gather(gather_val, local_val)
@@ -465,6 +559,7 @@ def main(rank, world_size, args, checkpoint_path):
             # determine scalar avg_val for comparisons
             avg_val_scalar = avg_val.item() if isinstance(avg_val, torch.Tensor) else float(avg_val)
 
+            # print(f'Rank {rank} evaluating on test set for task {local_task}...')
             local_test = evaluate(local_test_loader)
             gather_test = [torch.zeros_like(local_test) for _ in range(world_size)]
             dist.all_gather(gather_test, local_test)
@@ -476,7 +571,7 @@ def main(rank, world_size, args, checkpoint_path):
             if rank == 0:
                 best_avg_val, best_epoch = checkpoint_and_test(
                     epoch, avg_val_scalar, checkpoint_path, model_ddp, optimizer, scheduler,
-                    local_device, task_losses, val_accs, test_accs,
+                    local_device, task_losses, train_accs, val_accs, test_accs,
                     algorithms, logger, best_avg_val, best_epoch, total_losses
                 )
 
@@ -519,6 +614,7 @@ if __name__ == '__main__':
     parser.add_argument("--lr", type=float, required=True, help="Initial learning rate.")
     parser.add_argument("--eta", type=float, required=True, help="L1 Regularization parameter.")
     parser.add_argument("--weight_decay", type=float, required=True, help="Weight decay parameter.")
+    parser.add_argument("--schedule", type=bool, default=False, help="Use cosine regularization schedule.")
     parser.add_argument("--model", type=str, default="GINE", help="Model name to use.")
     parser.add_argument("--hidden_dim", default=128, type=int, help="Hidden dimension size.")
     parser.add_argument("--lambda_hint", default=1.0, type=float, help="Hint weight.")
@@ -537,12 +633,12 @@ if __name__ == '__main__':
         raise AssertionError(f"CUDA is not available but {len(algorithms)} CUDA devices are required for distributed training.")
     num_cuda = torch.cuda.device_count()
     assert num_cuda == len(algorithms), (
-        f"Expected exactly {len(algorithms)} CUDA devices (one per algorithm), but found {num_cuda}. "
+        f"Expected exactly {len(algorithms)} CUDA devices (one per algorithm), but found {num_cuda}."
         "Adjust CUDA_VISIBLE_DEVICES or your hardware configuration."
     )
 
-    config_str = f'distributed_{args.model}_l1_schedule_lr={args.lr}_eta={args.eta}_weight_decay={args.weight_decay}_batch_size={args.batch_size}_seed={args.seed}'
-    checkpoint_path = f'./checkpoints/{config_str}/'
+    config_str = f'new_all_tasks_distributed_{args.model}_l1_schedule_lr={args.lr}_eta={args.eta}_weight_decay={args.weight_decay}_lambda_hint={args.lambda_hint}_lambda_hidden={args.lambda_hidden}_schedule={args.schedule}_batch_size={args.batch_size}_seed={args.seed}_hidden_dim={args.hidden_dim}'
+    checkpoint_path = f'/qfs/projects/stargazer/share/minar/new_experiments/checkpoints/{config_str}/'
     print(f'Saving to {checkpoint_path}')
     world_size = len(algorithms)
 
@@ -553,5 +649,6 @@ if __name__ == '__main__':
               'Cores will be reused.')
     cores = list(range(cpu_count))
 
+    print(f'Spawning {world_size} processes.')
     mp.set_start_method('spawn', force=True)
     mp.spawn(_entry, args=(world_size, args, checkpoint_path, cores), nprocs=world_size, join=True)

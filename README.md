@@ -21,7 +21,9 @@ The SALSA-CLRS experiments are contained in the folder `new_experiments`.
 3. Clean/corrupted data generation is in `generate_corrupted_data.py`.
 4. The model training script used is `train_salsa_clrs_distributed_l1_schedule.py`. (NOTE: The script assumes access to 7 GPUs to perform multi-GPU parallel training.)
 5. Plotting of model progress is in `salsa_clrs_plots.ipynb`
-6. Circuit analysis is performed in `salsa-clrs_circuits.ipynb`. Since identifying large circuits can be time-consuming, an alternative script is given in `compute_salsa-clrs_circuits.py` which can be run in the background.
+6. Circuit analysis is performed in `salsa-clrs_circuits.ipynb`. Since identifying large circuits can be time-consuming, an alternative script is given in `compute_salsa-clrs_circuits.py` which can be run in the background or in parallel.
+7. Evaluation of the BFS circuit is performed in `salsa-clrs_bfs_performance.ipynb`
+8. Ablation studies can be found in `salsa-clrs_ablations.ipynb` and `salsa-clrs_circuits_corruptions.ipynb`
 
 ### DISCLAIMER
 This material was prepared as an account of work sponsored by an agency of the

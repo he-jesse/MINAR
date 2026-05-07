@@ -1,0 +1,63 @@
+\documentclass{article}
+\usepackage[x11names, svgnames, rgb]{xcolor}
+\usepackage[utf8]{inputenc}
+\usepackage{tikz}
+\usetikzlibrary{snakes,arrows,shapes}
+\usepackage{amsmath}
+%
+%
+
+%
+
+%
+
+\begin{document}
+\pagestyle{empty}
+%
+%
+%
+
+\enlargethispage{100cm}
+% Start of code
+\begin{tikzpicture}[>=latex',line join=bevel,]
+%%
+\node (convs*0*agg_mlp*lins*0*58) at (80.375bp,522.0bp) [draw,rectangle,rounded, filled] {convs.0.agg\_mlp.lins.0.58};
+  \node (convs*0*agg_mlp*lins*1*17) at (80.375bp,450.0bp) [draw,rectangle,rounded, filled] {convs.0.agg\_mlp.lins.1.17};
+  \node (convs*0*up_mlp*lins*0*14) at (80.375bp,378.0bp) [draw,rectangle,rounded, filled] {convs.0.up\_mlp.lins.0.14};
+  \node (convs*1*agg_mlp*lins*1*55) at (80.375bp,162.0bp) [draw,rectangle,rounded, filled] {convs.1.agg\_mlp.lins.1.55};
+  \node (convs*1*up_mlp*lins*0*5) at (80.375bp,90.0bp) [draw,rectangle,rounded, filled] {convs.1.up\_mlp.lins.0.5};
+  \node (output) at (80.375bp,18.0bp) [draw,rectangle,rounded, filled] {output};
+  \node (convs*0*up_mlp*lins*1*2) at (80.375bp,306.0bp) [draw,rectangle,rounded, filled] {convs.0.up\_mlp.lins.1.2};
+  \node (convs*1*agg_mlp*lins*0*5) at (80.375bp,234.0bp) [draw,rectangle,rounded, filled] {convs.1.agg\_mlp.lins.0.5};
+  \node (edge_weight) at (200.38bp,594.0bp) [draw,rectangle,rounded, filled] {edge\_weight};
+  \node (x) at (80.375bp,594.0bp) [draw,rectangle,rounded, filled] {x};
+  \definecolor{strokecolor}{rgb}{0.89,0.42,0.33};
+  \draw [strokecolor,->] (convs*0*agg_mlp*lins*0*58) ..controls (80.375bp,497.25bp) and (80.375bp,489.73bp)  .. (convs*0*agg_mlp*lins*1*17);
+  \definecolor{strokecolor}{rgb}{0.89,0.42,0.33};
+  \draw [strokecolor,->] (convs*0*agg_mlp*lins*1*17) ..controls (80.375bp,425.25bp) and (80.375bp,417.73bp)  .. (convs*0*up_mlp*lins*0*14);
+  \definecolor{strokecolor}{rgb}{0.71,0.02,0.15};
+  \draw [strokecolor,->] (convs*1*agg_mlp*lins*1*55) ..controls (80.375bp,137.25bp) and (80.375bp,129.73bp)  .. (convs*1*up_mlp*lins*0*5);
+  \definecolor{strokecolor}{rgb}{0.71,0.02,0.15};
+  \draw [strokecolor,->] (convs*1*up_mlp*lins*0*5) ..controls (80.375bp,65.254bp) and (80.375bp,57.726bp)  .. (output);
+  \definecolor{strokecolor}{rgb}{0.89,0.42,0.33};
+  \draw [strokecolor,->] (convs*0*up_mlp*lins*1*2) ..controls (80.375bp,281.25bp) and (80.375bp,273.73bp)  .. (convs*1*agg_mlp*lins*0*5);
+  \definecolor{strokecolor}{rgb}{0.71,0.02,0.15};
+  \draw [strokecolor,->] (convs*1*agg_mlp*lins*0*5) ..controls (80.375bp,209.25bp) and (80.375bp,201.73bp)  .. (convs*1*agg_mlp*lins*1*55);
+  \definecolor{strokecolor}{rgb}{0.89,0.42,0.33};
+  \draw [strokecolor,->] (convs*0*up_mlp*lins*0*14) ..controls (80.375bp,353.25bp) and (80.375bp,345.73bp)  .. (convs*0*up_mlp*lins*1*2);
+  \definecolor{strokecolor}{rgb}{0.97,0.71,0.59};
+  \draw [strokecolor,->] (edge_weight) ..controls (155.83bp,567.02bp) and (138.08bp,556.66bp)  .. (convs*0*agg_mlp*lins*0*58);
+  \definecolor{strokecolor}{rgb}{0.96,0.75,0.64};
+  \draw [strokecolor,->] (edge_weight) ..controls (212.96bp,526.34bp) and (232.48bp,381.8bp)  .. (172.38bp,288.0bp) .. controls (164.85bp,276.25bp) and (153.73bp,266.82bp)  .. (convs*1*agg_mlp*lins*0*5);
+  \definecolor{strokecolor}{rgb}{0.97,0.71,0.59};
+  \draw [strokecolor,->] (x) ..controls (80.375bp,569.25bp) and (80.375bp,561.73bp)  .. (convs*0*agg_mlp*lins*0*58);
+%
+\end{tikzpicture}
+% End of code
+
+%
+\end{document}
+%
+
+
+
