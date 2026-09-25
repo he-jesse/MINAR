@@ -76,10 +76,11 @@ def compute_weight_grad_scores(
 
     for name, module in model.processor.named_modules():
         if _place_hook(module, hook_str='register_full_backward_hook') and hasattr(module, 'weight'):
-            scores[name] = module.weight.grad.detach().clone().T / data.num_nodes
+            scores[name] = module.weight.grad.detach().clone().cpu().T # / data.num_nodes
             
     # clean up gpu memory
     model.zero_grad(set_to_none=True)
+    L.grad = None
     return scores
 
 def compute_eap_scores(model: EncodeProcessDecode,
@@ -166,10 +167,11 @@ def compute_eap_scores(model: EncodeProcessDecode,
                 score_matrix = (act(corr_act) - act(clean_act)).T @ grad
             else:
                 score_matrix = (corr_act - clean_act).T @ grad
-            scores[name] = score_matrix.T.detach() / data.num_nodes
+            scores[name] = score_matrix.T.detach().cpu() # / data.num_nodes
     
     # clean up gpu memory
     model.zero_grad(set_to_none=True)
+    L.grad = None
 
     return scores
 
@@ -283,10 +285,11 @@ def compute_eap_ig_scores(model: EncodeProcessDecode,
                 score_matrix = (act(corr_act) - act(clean_act)).T @ grad
             else:
                 score_matrix = (corr_act - clean_act).T @ grad
-            scores[name] = score_matrix.T.detach() / data.num_nodes
+            scores[name] = score_matrix.T.detach().cpu() # / data.num_nodes
     
     # clean up gradients
     model.zero_grad(set_to_none=True)
+    L.grad = None
 
     return scores
 
@@ -303,6 +306,7 @@ class SALSACLRSComputationGraph(ComputationGraph):
                         corrupted_data,
                         loss,
                         which='EAP',
+                        batch_size=32,
                         **kwargs):
         '''
         Calculate edge attribution scores for a SALSACLRS EncodeProcessDecode model. 
@@ -332,9 +336,10 @@ class SALSACLRSComputationGraph(ComputationGraph):
             raise NotImplementedError()
         all_scores = []
         avg_scores = {}
+        total_nodes = 0
 
-        clean_loader = SALSACLRSDataLoader(clean_data, batch_size=32, shuffle=False, num_workers=1)
-        corrupted_loader = SALSACLRSDataLoader(corrupted_data, batch_size=32, shuffle=False, num_workers=1)
+        clean_loader = SALSACLRSDataLoader(clean_data, batch_size=batch_size, shuffle=False, num_workers=1)
+        corrupted_loader = SALSACLRSDataLoader(corrupted_data, batch_size=batch_size, shuffle=False, num_workers=1)
         for data, data_corr in zip(clean_loader, corrupted_loader):
             data.task = algorithm
             data_corr.task = algorithm
@@ -345,8 +350,10 @@ class SALSACLRSComputationGraph(ComputationGraph):
                 data.edge_attr = torch.zeros((data.num_edges, 1), device=self.EncodeProcessDecode.device)
                 data_corr.edge_attr = torch.zeros((data_corr.num_edges, 1), device=self.EncodeProcessDecode.device)
             all_scores.append(score_function(self.EncodeProcessDecode, data, data_corr, loss, **kwargs))
+            total_nodes += data.num_nodes
         for key in all_scores[0].keys():
-            avg_scores[key] = torch.mean(torch.stack([score_dict[key] for score_dict in all_scores]), 0)
+            # avg_scores[key] = torch.mean(torch.stack([score_dict[key] for score_dict in all_scores]), 0)
+            avg_scores[key] = torch.sum(torch.stack([score_dict[key] for score_dict in all_scores]), 0) / total_nodes
         for key, score in avg_scores.items():
             for j in range(score.shape[1]):
                 v = key + f'.{j}'

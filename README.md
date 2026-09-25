@@ -1,6 +1,6 @@
 # MINAR: Mechanistic Interpretability for Neural Algorithmic Reasoning
 
-This contains the code for the submission MINAR: Mechanistic Interpretability for Neural Algorithmic Reasoning to NeurIPS 2026. The code was developed and tested using Python 3.12.3. The package requirements are listed in `environment.yml`.
+This contains the code for the paper MINAR: Mechanistic Interpretability for Neural Algorithmic Reasoning. The code was developed and tested using Python 3.12.3. The package requirements are listed in `environment.yml`.
 
 ## Instructions
 
@@ -12,7 +12,7 @@ Bellman-Ford experiments are divided into subfolders. Each subfolder contains
 1. A training notebook
 2. A circuit analysis notebook, and
 3. A plotting notebook.
-In each notebook, simply run all cells. Note that model training may take some time (up to 30 min on the hardware reported in the paper).
+In each notebook, simply run all cells. Note that model training may take up to 30 min on the hardware reported in the paper.
 
 ### SALSA-CLRS
 The SALSA-CLRS experiments are contained in the folder `new_experiments`.

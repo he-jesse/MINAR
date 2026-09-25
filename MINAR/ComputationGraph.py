@@ -28,7 +28,7 @@ class ComputationGraph(nx.DiGraph):
         super().__init__()
         
         self.model = model
-        input_dim = model.in_channels
+        input_dim = model.in_channels if hasattr(model, 'in_channels') else model.in_features
         self.layers = [[f'input.{i}' for i in range(input_dim)]]
         self.modules = {}
         for v in self.layers[0]:
@@ -40,7 +40,7 @@ class ComputationGraph(nx.DiGraph):
                     layer = []
                     if name is None or name == '':
                         name = module_name if module_name is not None else 'output'
-                    for i in range(module.out_channels):
+                    for i in range(module.out_channels if hasattr(module, 'out_channels') else module.out_features):
                         v = f'{name}.{i}'
                         self.add_node(v, layer = l)
                         layer.append(v)
@@ -244,10 +244,13 @@ class ComputationGraph(nx.DiGraph):
             raise NotImplementedError()
         all_scores = []
         avg_scores = {}
+        total_nodes = 0
         for data, data_corr in zip(clean_data, corrupted_data):
             all_scores.append(score_function(self.model, data, data_corr, loss, **kwargs))
+            total_nodes += data.num_nodes
         for key in all_scores[0].keys():
-            avg_scores[key] = torch.mean(torch.stack([score_dict[key] for score_dict in all_scores]), 0)
+            # avg_scores[key] = torch.mean(torch.stack([score_dict[key] for score_dict in all_scores]), 0)
+            avg_scores[key] = torch.sum(torch.stack([score_dict[key] for score_dict in all_scores]), 0) / total_nodes
         for key, score in avg_scores.items():
             for j in range(score.shape[1]):
                 v = key + f'.{j}'

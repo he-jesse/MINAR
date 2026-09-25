@@ -39,10 +39,11 @@ def compute_weight_grad_scores(
 
     for name, module in model.named_modules():
         if _place_hook(module, hook_str='register_full_backward_hook') and hasattr(module, 'weight'):
-            scores[name] = module.weight.grad.detach().clone().T / data.num_nodes
+            scores[name] = module.weight.grad.detach().clone().T # / data.num_nodes
             
     # clean up gpu memory
     model.zero_grad(set_to_none=True)
+    L.grad = None
     return scores
 
 def compute_eap_scores(model: torch.nn.Module,
@@ -135,10 +136,11 @@ def compute_eap_scores(model: torch.nn.Module,
                 score_matrix = (act(corr_act) - act(clean_act)).T @ grad
             else:
                 score_matrix = (corr_act - clean_act).T @ grad
-            scores[name] = score_matrix.T / data.num_nodes
+            scores[name] = score_matrix.T # / data.num_nodes
     
     # clean up gpu memory
     model.zero_grad(set_to_none=True)
+    L.grad = None
 
     return scores
 
@@ -252,9 +254,10 @@ def compute_eap_ig_scores(model: torch.nn.Module,
                 score_matrix = (act(corr_act) - act(clean_act)).T @ grad
             else:
                 score_matrix = (corr_act - clean_act).T @ grad
-            scores[name] = score_matrix.T / data.num_nodes
+            scores[name] = score_matrix.T # / data.num_nodes
     
     # clean up gpu memory
     model.zero_grad(set_to_none=True)
+    L.grad = None
 
     return scores
