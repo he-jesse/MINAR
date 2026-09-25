@@ -24,10 +24,4 @@ The SALSA-CLRS experiments are contained in the folder `new_experiments`.
 6. Circuit analysis is performed in `salsa-clrs_circuits.ipynb`. Since identifying large circuits can be time-consuming, an alternative script is given in `compute_salsa-clrs_circuits.py` which can be run in the background or in parallel.
 7. Evaluation of the BFS circuit is performed in `salsa-clrs_bfs_performance.ipynb`
 8. Ablation studies can be found in `salsa-clrs_ablations.ipynb` and `salsa-clrs_circuits_corruptions.ipynb`
-
-                 PACIFIC NORTHWEST NATIONAL LABORATORY
-                              operated by
-                                BATTELLE
-                                for the
-                   UNITED STATES DEPARTMENT OF ENERGY
-                    under Contract DE-AC05-76RL01830
+9. 
