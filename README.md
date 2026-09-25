@@ -23,5 +23,4 @@ The SALSA-CLRS experiments are contained in the folder `new_experiments`.
 5. Plotting of model progress is in `salsa_clrs_plots.ipynb`
 6. Circuit analysis is performed in `salsa-clrs_circuits.ipynb`. Since identifying large circuits can be time-consuming, an alternative script is given in `compute_salsa-clrs_circuits.py` which can be run in the background or in parallel.
 7. Evaluation of the BFS circuit is performed in `salsa-clrs_bfs_performance.ipynb`
-8. Ablation studies can be found in `salsa-clrs_ablations.ipynb` and `salsa-clrs_circuits_corruptions.ipynb`
-9. 
+8. Ablation studies can be found in `salsa-clrs_ablations.ipynb` and `salsa-clrs_circuits_corruptions.ipynb
